@@ -34,6 +34,28 @@ try {
         
         # 自動按下 Ctrl+S
         [System.Windows.Forms.SendKeys]::SendWait("^s")
+        Start-Sleep -Milliseconds 1000
+        
+        # 執行 Git 自動上傳
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] 執行 Git 自動上傳..." -ForegroundColor Blue
+        
+        try {
+            # Git add script.js
+            Write-Host "  -> git add script.js" -ForegroundColor Gray
+            $gitAdd = git add script.js 2>&1
+            
+            # Git commit
+            Write-Host "  -> git commit -m 'Auto Fix Bug'" -ForegroundColor Gray
+            $gitCommit = git commit -m "Auto Fix Bug" 2>&1
+            
+            # Git push (使用 --force 確保上傳成功)
+            Write-Host "  -> git push origin main --force" -ForegroundColor Gray
+            $gitPush = git push origin main --force 2>&1
+            
+            Write-Host "  -> Git 上傳完成！" -ForegroundColor Green
+        } catch {
+            Write-Host "  -> Git 操作失敗: $($_.Exception.Message)" -ForegroundColor Red
+        }
         
         Start-Sleep -Seconds 5
     }

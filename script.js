@@ -92,13 +92,8 @@ async function initializeGameStats() {
 
 // 讀取資料 - 加入鎖定檢查
 async function loadRealTimeStats() {
+    if (isDeleting) { console.log('[MJ999] 偵測到刪除進行中，跳過本次自動刷新'); return; }
     if (!mjClient) return;
-    
-    // 攔截自動刷新：如果正在刪除，定時器抓到的舊資料就不會覆蓋掉目前的畫面
-    if (isDeleting) {
-        console.log('[MJ999] 刪除進行中，跳過自動刷新防止資料復活');
-        return;
-    }
     
     try {
         const { data, error } = await mjClient
@@ -170,7 +165,7 @@ async function cancelMatch(matchId) {
     if (!confirm('確定取消？')) return;
     
     try {
-        // 在 try 區塊一開始，將 isDeleting 設為 true
+        // 在 try 的第一行，將 isDeleting 設為 true
         isDeleting = true;
         console.log('[MJ999] 🗑️ 開始刪除牌局:', matchId);
         
@@ -199,9 +194,9 @@ async function cancelMatch(matchId) {
         alert('刪除失敗，請重新整理');
         loadRealTimeStats(); // 異常時重新載入
     } finally {
-        // 在函數最後，3 秒內禁止任何自動刷新
-        setTimeout(() => { isDeleting = false; }, 3000);
-        console.log('[MJ999] 🔓 3秒後解除刪除鎖定');
+        // 在函數最後，5 秒內禁止任何自動刷新
+        setTimeout(() => { isDeleting = false; }, 5000);
+        console.log('[MJ999] 🔓 5秒後解除刪除鎖定');
     }
 }
 
