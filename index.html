@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MJ999 智能配對系統 - 明星三缺一</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Loading Section -->
+    <div id="loading-section" class="loading-section">
+        <div class="loading-spinner"></div>
+        <p class="loading-text">系統載入中...</p>
+    </div>
+
+    <!-- Login Section -->
+    <div id="login-section" class="login-section" style="display: none;">
+        <div class="login-container">
+            <h1 class="main-title">MJ999 智能配對系統</h1>
+            <p class="subtitle">明星三缺一，等你來開局</p>
+            <button id="login-btn" class="login-btn" onclick="handleLogin()">
+                <span class="line-icon">LINE</span>
+                使用 LINE 登入
+            </button>
+        </div>
+    </div>
+
+    <!-- Game Lobby Section -->
+    <div id="lobby-section" class="lobby-section" style="display: none;">
+        <!-- Player Info Bar -->
+        <header class="player-info-bar">
+            <div class="player-profile">
+                <img id="player-avatar" src="https://via.placeholder.com/50" alt="玩家頭像" class="player-avatar">
+                <div class="player-details">
+                    <h3 id="player-name">載入中...</h3>
+                </div>
+            </div>
+            <button class="logout-btn" onclick="handleLogout()">登出</button>
+        </header>
+
+        <!-- Main Lobby Content -->
+        <main class="lobby-main">
+            <!-- Lobby Stats -->
+            <section class="lobby-stats">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-number" id="available-tables">--</div>
+                        <div class="stat-label">現場空桌</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" id="waiting-players">--</div>
+                        <div class="stat-label">揪團中</div>
+                    </div>
+                    <div class="stat-card">
+                        <button class="service-btn" onclick="callService()">
+                            <span class="btn-icon">📞</span>
+                            呼叫店小二
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Quick Join Section -->
+            <section class="quick-join">
+                <h2 class="section-title">快速配桌</h2>
+                <div id="room-status" class="room-status" style="display: block;">
+                    <p>🎯 目前暫無揪團，趕快發起新局吧！</p>
+                </div>
+                <div id="room-cards" class="room-cards" style="display: none;">
+                    <!-- 動態生成的房間卡片會放在這裡 -->
+                </div>
+            </section>
+
+            <!-- Create New Game -->
+            <section class="create-game">
+                <h2 class="section-title">發起新局</h2>
+                <div class="create-game-card">
+                    <div class="game-options">
+                        <div class="option-group">
+                            <label>約定時間</label>
+                            <select id="game-time">
+                                <option value="full">滿開 (人滿即開)</option>
+                            </select>
+                        </div>
+                        <div class="option-group">
+                            <label>分數設定</label>
+                            <select id="game-stakes">
+                                <option value="30-10">底 30 / 台 10</option>
+                                <option value="60-20">底 60 / 台 20</option>
+                                <option value="100-20">底 100 / 台 20</option>
+                                <option value="200-50">底 200 / 台 50</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="create-game-btn" onclick="createNewGame()">
+                        <span class="btn-icon">🎲</span>
+                        發起新局
+                    </button>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- LIFF SDK -->
+    <script src="https://static.line-scdn.net/liff/edge/versions/2.22.0/sdk.js"></script>
+    <!-- Supabase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Main Script -->
+    <script src="script.js?v=20260331"></script>
+</body>
+</html>
