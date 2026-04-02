@@ -5,6 +5,7 @@
 let liffInitialized = false;
 let userData = null;
 let isLoggedInState = false;
+let isDeleting = false; // 狀態鎖：防止刪除時資料復活
 let gameStats = {
     totalTables: 12,
     availableTables: 0,
@@ -93,9 +94,9 @@ async function initializeGameStats() {
 async function loadRealTimeStats() {
     if (!mjClient) return;
     
-    // 如果正在刪除，直接跳過避免干擾
+    // 攔截自動刷新：如果正在刪除，定時器抓到的舊資料就不會覆蓋掉目前的畫面
     if (isDeleting) {
-        console.log('[MJ999] 刪除進行中，跳過自動刷新');
+        console.log('[MJ999] 刪除進行中，跳過自動刷新防止資料復活');
         return;
     }
     
@@ -160,8 +161,6 @@ function updateUI() {
 }
 
 // 刪除功能 - 手術級精確修復
-let isDeleting = false; // 全域鎖定變數
-
 async function cancelMatch(matchId) {
     if (isDeleting) {
         console.log('[MJ999] 刪除進行中，忽略重複請求');
@@ -170,9 +169,9 @@ async function cancelMatch(matchId) {
     
     if (!confirm('確定取消？')) return;
     
-    isDeleting = true; // 開始鎖定
-    
     try {
+        // 在 try 區塊一開始，將 isDeleting 設為 true
+        isDeleting = true;
         console.log('[MJ999] 🗑️ 開始刪除牌局:', matchId);
         
         // 等待 Supabase delete() 完全完成
@@ -184,12 +183,12 @@ async function cancelMatch(matchId) {
                 isDeleting = false;
                 return;
             }
-        }
+        } 
         
-        // 手動從記憶體移除該筆資料 - 強制覆蓋資料庫快取
+        // 執行成功後，手動更新本地數據
         gameStats.activeGames = gameStats.activeGames.filter(g => g.id !== matchId);
         
-        // 立即執行 renderCards 更新畫面 - 不依賴 loadGames
+        // 立即呼叫 renderCards 刷新畫面，不需要等待資料庫回傳
         renderCards(gameStats.activeGames);
         
         console.log('[MJ999] ✅ 刪除完成，畫面已更新');
@@ -200,7 +199,9 @@ async function cancelMatch(matchId) {
         alert('刪除失敗，請重新整理');
         loadRealTimeStats(); // 異常時重新載入
     } finally {
-        isDeleting = false; // 解除鎖定
+        // 在函數最後，3 秒內禁止任何自動刷新
+        setTimeout(() => { isDeleting = false; }, 3000);
+        console.log('[MJ999] 🔓 3秒後解除刪除鎖定');
     }
 }
 
@@ -309,7 +310,9 @@ function initializeTimeOptions() {
     fullOption.textContent = '滿開 (人滿即開)';
     select.appendChild(fullOption);
     
-    // 固定生成從 00:00 到 23:30 的選項，每半小時一格
+    // 確保生成的選項是從 00:00 到 23:30 固定排序，不受目前時間影響
+    console.log('[MJ999] ⏰ 生成固定 24 小時時間選項 (00:00~23:30)');
+    
     for (let hour = 0; hour < 24; hour++) {
         for (let minute of [0, 30]) {
             // 跳過 00:00 因為第一個已經是滿開
@@ -320,10 +323,12 @@ function initializeTimeOptions() {
             option.value = timeStr;
             option.textContent = timeStr;
             select.appendChild(option);
+            
+            console.log(`[MJ999]   添加時間選項: ${timeStr}`);
         }
     }
     
-    console.log('[MJ999] ⏰ 固定 24 小時時間選項生成完成 (00:00~23:30)');
+    console.log(`[MJ999] ✅ 固定 24 小時時間選項生成完成，共 ${select.options.length - 1} 個時段`);
 }
 
 // 登入處理
