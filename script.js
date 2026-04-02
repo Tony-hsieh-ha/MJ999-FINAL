@@ -89,9 +89,16 @@ async function initializeGameStats() {
     await loadRealTimeStats();
 }
 
-// 讀取資料
+// 讀取資料 - 加入鎖定檢查
 async function loadRealTimeStats() {
     if (!mjClient) return;
+    
+    // 如果正在刪除，跳過自動刷新避免干擾
+    if (isDeleting) {
+        console.log('[MJ999] 刪除進行中，跳過自動刷新');
+        return;
+    }
+    
     try {
         const { data, error } = await mjClient
             .from('matches')
@@ -150,33 +157,50 @@ function updateUI() {
     }
 }
 
-// 刪除功能 - 前端優先更新
+// 刪除功能 - 徹底解決復活問題
+let isDeleting = false; // 鎖定機制：防止刪除過程中自動刷新
+
 async function cancelMatch(matchId) {
+    if (isDeleting) {
+        console.log('[MJ999] 刪除進行中，忽略重複請求');
+        return;
+    }
+    
     if (!confirm('確定取消？')) return;
     
+    isDeleting = true; // 開始鎖定
+    
     try {
-        // 前端優先：立即從本地陣列移除
-        gameStats.activeGames = gameStats.activeGames.filter(g => g.id !== matchId);
-        updateUI();
+        console.log('[MJ999] 🗑️ 開始刪除牌局:', matchId);
         
-        // 等待後台刪除完成
+        // 等待 Supabase delete() 完全完成
         if (mjClient) {
             const { error } = await mjClient.from('matches').delete().eq('id', matchId);
             if (error) {
-                // 如果後台刪除失敗，恢復本地資料
                 console.error('[MJ999] 後台刪除失敗:', error);
-                loadRealTimeStats(); // 重新載入資料
                 alert('刪除失敗，請重新整理');
+                isDeleting = false;
                 return;
             }
         }
         
+        // 後台刪除成功後，手動從本地陣列移除
+        console.log('[MJ999] ✅ 後台刪除成功，移除本地資料');
+        gameStats.activeGames = gameStats.activeGames.filter(g => g.id !== matchId);
+        
+        // 立即更新 UI，防止閃爍
+        updateUI();
+        
         alert('✅ 已取消');
+        
     } catch (error) {
         console.error('[MJ999] 刪除異常:', error);
-        // 如果發生異常，重新載入資料確保一致性
-        loadRealTimeStats();
         alert('刪除失敗，請重新整理');
+        // 發生異常時重新載入資料
+        loadRealTimeStats();
+    } finally {
+        isDeleting = false; // 解除鎖定
+        console.log('[MJ999] 🔓 刪除流程完成，解除鎖定');
     }
 }
 
@@ -237,7 +261,7 @@ async function quickJoinGame(gameId) {
     // TODO: 實際加入邏輯
 }
 
-// 時間選項 - 修正整點半點格式
+// 時間選項 - 24小時完整格式化
 function initializeTimeOptions() {
     const select = document.getElementById('game-time');
     if (!select) return;
@@ -265,14 +289,17 @@ function initializeTimeOptions() {
         startMinute = 0;
     }
     
-    // 生成接下來 12 小時的整點和半點選項
-    for (let i = 0; i < 24; i++) { // 12小時 * 2 (每小時2個時間點)
+    // 生成未來 24 小時內的所有整點(:00)與半點(:30)
+    for (let i = 0; i < 48; i++) { // 24小時 * 2 (每小時2個時間點)
         const totalMinutes = startHour * 60 + startMinute + i * 30;
         const hour = Math.floor(totalMinutes / 60) % 24;
         const minute = totalMinutes % 60;
         
-        // 只生成到當天 23:30
-        if (hour === 23 && minute > 30) break;
+        // 生成未來 24 小時內的選項
+        const optionTime = new Date(now.getTime() + i * 30 * 60000);
+        const hoursDiff = (optionTime - now) / (1000 * 60 * 60);
+        
+        if (hoursDiff > 24) break; // 超過 24 小時就停止
         
         const option = document.createElement('option');
         const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
@@ -280,6 +307,8 @@ function initializeTimeOptions() {
         option.textContent = timeStr;
         select.appendChild(option);
     }
+    
+    console.log('[MJ999] ⏰ 時間選項生成完成，共', select.options.length - 1, '個時段');
 }
 
 // 登入處理
