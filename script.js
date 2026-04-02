@@ -85,7 +85,7 @@ async function initializeLiff() {
 async function initializeGameStats() {
     initializeSupabase();
     initializeTimeOptions();
-    setInterval(loadRealTimeStats, 30000);
+    setInterval(loadRealTimeStats, 10000); // 調整為 10 秒更新一次
     await loadRealTimeStats();
 }
 
@@ -155,25 +155,28 @@ async function cancelMatch(matchId) {
     if (!confirm('確定取消？')) return;
     
     try {
-        // 前端優先：立即移除卡片
-        const card = document.querySelector(`[data-game-id="${matchId}"]`);
-        if (card) {
-            card.remove();
-            // 同時更新本地資料
-            gameStats.activeGames = gameStats.activeGames.filter(g => g.id !== matchId);
-            updateUI();
-        }
+        // 前端優先：立即從本地陣列移除
+        gameStats.activeGames = gameStats.activeGames.filter(g => g.id !== matchId);
+        updateUI();
         
-        // 後台刪除
+        // 等待後台刪除完成
         if (mjClient) {
             const { error } = await mjClient.from('matches').delete().eq('id', matchId);
-            if (error) throw error;
+            if (error) {
+                // 如果後台刪除失敗，恢復本地資料
+                console.error('[MJ999] 後台刪除失敗:', error);
+                loadRealTimeStats(); // 重新載入資料
+                alert('刪除失敗，請重新整理');
+                return;
+            }
         }
         
-        alert('已取消');
+        alert('✅ 已取消');
     } catch (error) {
-        alert('刪除失敗，請重新整理');
+        console.error('[MJ999] 刪除異常:', error);
+        // 如果發生異常，重新載入資料確保一致性
         loadRealTimeStats();
+        alert('刪除失敗，請重新整理');
     }
 }
 
@@ -234,17 +237,48 @@ async function quickJoinGame(gameId) {
     // TODO: 實際加入邏輯
 }
 
-// 時間選項
+// 時間選項 - 修正整點半點格式
 function initializeTimeOptions() {
     const select = document.getElementById('game-time');
     if (!select) return;
     
-    select.innerHTML = '<option value="full">滿開 (人滿即開)</option>';
+    // 清空選項
+    select.innerHTML = '';
+    
+    // 第一選項：滿開
+    const fullOption = document.createElement('option');
+    fullOption.value = 'full';
+    fullOption.textContent = '滿開 (人滿即開)';
+    select.appendChild(fullOption);
+    
+    // 獲取當前時間
     const now = new Date();
-    for(let i=1; i<=8; i++) {
-        const t = new Date(now.getTime() + i * 30 * 60000);
-        const tStr = `${t.getHours().toString().padStart(2,'0')}:${t.getMinutes().toString().padStart(2,'0')}`;
-        select.innerHTML += `<option value="${tStr}">${tStr}</option>`;
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    
+    // 計算下一個整點或半點
+    let startHour = currentHour;
+    let startMinute = currentMinute <= 30 ? 30 : 60;
+    
+    if (startMinute === 60) {
+        startHour++;
+        startMinute = 0;
+    }
+    
+    // 生成接下來 12 小時的整點和半點選項
+    for (let i = 0; i < 24; i++) { // 12小時 * 2 (每小時2個時間點)
+        const totalMinutes = startHour * 60 + startMinute + i * 30;
+        const hour = Math.floor(totalMinutes / 60) % 24;
+        const minute = totalMinutes % 60;
+        
+        // 只生成到當天 23:30
+        if (hour === 23 && minute > 30) break;
+        
+        const option = document.createElement('option');
+        const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+        option.value = timeStr;
+        option.textContent = timeStr;
+        select.appendChild(option);
     }
 }
 
