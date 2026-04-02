@@ -295,7 +295,7 @@ async function quickJoinGame(gameId) {
     // TODO: 實際加入邏輯
 }
 
-// 時間選項 - 固定 24 小時靜態列表
+// 時間選項 - 固定 24 小時靜態列表 (00:00~23:30)
 function initializeTimeOptions() {
     const select = document.getElementById('game-time');
     if (!select) return;
@@ -309,7 +309,7 @@ function initializeTimeOptions() {
     fullOption.textContent = '滿開 (人滿即開)';
     select.appendChild(fullOption);
     
-    // 直接用 for 迴圈生成從 00:00 到 23:30 的固選單，每半小時一格
+    // 固定生成從 00:00 到 23:30 的選項，每半小時一格
     for (let hour = 0; hour < 24; hour++) {
         for (let minute of [0, 30]) {
             // 跳過 00:00 因為第一個已經是滿開
@@ -323,7 +323,7 @@ function initializeTimeOptions() {
         }
     }
     
-    console.log('[MJ999] ⏰ 固定 24 小時時間選項生成完成，共', select.options.length - 1, '個時段');
+    console.log('[MJ999] ⏰ 固定 24 小時時間選項生成完成 (00:00~23:30)');
 }
 
 // 登入處理
