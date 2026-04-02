@@ -93,7 +93,7 @@ async function initializeGameStats() {
 async function loadRealTimeStats() {
     if (!mjClient) return;
     
-    // 如果正在刪除，跳過自動刷新避免干擾
+    // 如果正在刪除，直接跳過避免干擾
     if (isDeleting) {
         console.log('[MJ999] 刪除進行中，跳過自動刷新');
         return;
@@ -309,7 +309,7 @@ function initializeTimeOptions() {
     fullOption.textContent = '滿開 (人滿即開)';
     select.appendChild(fullOption);
     
-    // 固定生成從 00:00 到 23:30 的所有選項 - 每 30 分鐘一格
+    // 直接用 for 迴圈生成從 00:00 到 23:30 的固選單，每半小時一格
     for (let hour = 0; hour < 24; hour++) {
         for (let minute of [0, 30]) {
             // 跳過 00:00 因為第一個已經是滿開
