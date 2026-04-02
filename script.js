@@ -108,7 +108,9 @@ async function loadRealTimeStats() {
         
         if (error) throw error;
         gameStats.activeGames = data || [];
-        updateUI();
+        
+        // 正常情況下使用 renderCards
+        renderCards(gameStats.activeGames);
     } catch (err) {
         console.error('更新失敗:', err);
     }
@@ -157,8 +159,8 @@ function updateUI() {
     }
 }
 
-// 刪除功能 - 徹底解決復活問題
-let isDeleting = false; // 鎖定機制：防止刪除過程中自動刷新
+// 刪除功能 - 手術級精確修復
+let isDeleting = false; // 全域鎖定變數
 
 async function cancelMatch(matchId) {
     if (isDeleting) {
@@ -184,23 +186,55 @@ async function cancelMatch(matchId) {
             }
         }
         
-        // 後台刪除成功後，手動從本地陣列移除
-        console.log('[MJ999] ✅ 後台刪除成功，移除本地資料');
+        // 手動從記憶體移除該筆資料 - 強制覆蓋資料庫快取
         gameStats.activeGames = gameStats.activeGames.filter(g => g.id !== matchId);
         
-        // 立即更新 UI，防止閃爍
-        updateUI();
+        // 立即執行 renderCards 更新畫面 - 不依賴 loadGames
+        renderCards(gameStats.activeGames);
         
+        console.log('[MJ999] ✅ 刪除完成，畫面已更新');
         alert('✅ 已取消');
         
     } catch (error) {
         console.error('[MJ999] 刪除異常:', error);
         alert('刪除失敗，請重新整理');
-        // 發生異常時重新載入資料
-        loadRealTimeStats();
+        loadRealTimeStats(); // 異常時重新載入
     } finally {
         isDeleting = false; // 解除鎖定
-        console.log('[MJ999] 🔓 刪除流程完成，解除鎖定');
+    }
+}
+
+// 獨立渲染函數 - 不依賴資料庫查詢
+function renderCards(games) {
+    const container = document.getElementById('room-cards');
+    const statusMsg = document.getElementById('room-status');
+    
+    if (!container || !statusMsg) return;
+    
+    if (games.length === 0) {
+        container.style.display = 'none';
+        statusMsg.style.display = 'block';
+    } else {
+        container.style.display = 'grid';
+        statusMsg.style.display = 'none';
+        container.innerHTML = '';
+        games.forEach(game => {
+            const isMyGame = userData && game.creator_name === userData.displayName;
+            const card = document.createElement('div');
+            card.className = 'room-card';
+            card.setAttribute('data-game-id', game.id);
+            card.innerHTML = `
+                <div class="room-header">
+                    <h3>${game.creator_name}的局</h3>
+                    ${isMyGame ? '<span class="my-game-badge">我的牌局</span>' : ''}
+                </div>
+                <div class="room-info">底: ${game.score_type} | 時間: ${game.appointment_time}</div>
+                ${isMyGame 
+                    ? `<button class="cancel-btn" onclick="cancelMatch('${game.id}')">取消開局</button>`
+                    : `<button class="join-btn" onclick="quickJoinGame('${game.id}')">快速加入</button>`}
+            `;
+            container.appendChild(card);
+        });
     }
 }
 
@@ -261,7 +295,7 @@ async function quickJoinGame(gameId) {
     // TODO: 實際加入邏輯
 }
 
-// 時間選項 - 24小時完整格式化
+// 時間選項 - 固定 24 小時靜態列表
 function initializeTimeOptions() {
     const select = document.getElementById('game-time');
     if (!select) return;
@@ -275,40 +309,21 @@ function initializeTimeOptions() {
     fullOption.textContent = '滿開 (人滿即開)';
     select.appendChild(fullOption);
     
-    // 獲取當前時間
-    const now = new Date();
-    const currentHour = now.getHours();
-    const currentMinute = now.getMinutes();
-    
-    // 計算下一個整點或半點
-    let startHour = currentHour;
-    let startMinute = currentMinute <= 30 ? 30 : 60;
-    
-    if (startMinute === 60) {
-        startHour++;
-        startMinute = 0;
+    // 固定生成從 00:00 到 23:30 的所有選項 - 每 30 分鐘一格
+    for (let hour = 0; hour < 24; hour++) {
+        for (let minute of [0, 30]) {
+            // 跳過 00:00 因為第一個已經是滿開
+            if (hour === 0 && minute === 0) continue;
+            
+            const option = document.createElement('option');
+            const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+            option.value = timeStr;
+            option.textContent = timeStr;
+            select.appendChild(option);
+        }
     }
     
-    // 生成未來 24 小時內的所有整點(:00)與半點(:30)
-    for (let i = 0; i < 48; i++) { // 24小時 * 2 (每小時2個時間點)
-        const totalMinutes = startHour * 60 + startMinute + i * 30;
-        const hour = Math.floor(totalMinutes / 60) % 24;
-        const minute = totalMinutes % 60;
-        
-        // 生成未來 24 小時內的選項
-        const optionTime = new Date(now.getTime() + i * 30 * 60000);
-        const hoursDiff = (optionTime - now) / (1000 * 60 * 60);
-        
-        if (hoursDiff > 24) break; // 超過 24 小時就停止
-        
-        const option = document.createElement('option');
-        const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-        option.value = timeStr;
-        option.textContent = timeStr;
-        select.appendChild(option);
-    }
-    
-    console.log('[MJ999] ⏰ 時間選項生成完成，共', select.options.length - 1, '個時段');
+    console.log('[MJ999] ⏰ 固定 24 小時時間選項生成完成，共', select.options.length - 1, '個時段');
 }
 
 // 登入處理
