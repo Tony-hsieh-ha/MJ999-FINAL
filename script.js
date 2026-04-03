@@ -171,7 +171,10 @@ async function cancelMatch(matchId) {
         
         // 等待 Supabase delete() 完全完成
         if (mjClient) {
-            const { error } = await mjClient.from('matches').delete().eq('id', matchId);
+            const { error } = await mjClient
+                .from('matches')
+                .delete()
+                .match({ id: matchId });
             if (error) {
                 console.error('[MJ999] 後台刪除失敗:', error);
                 alert('刪除失敗，請重新整理');
