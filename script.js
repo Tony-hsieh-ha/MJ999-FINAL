@@ -389,5 +389,34 @@ window.handleLogout = handleLogout;
 window.cancelMatch = cancelMatch;
 window.createNewGame = createNewGame;
 window.quickJoinGame = quickJoinGame;
+window.leaveMessage = leaveMessage;
+
+// 給店家留言功能
+async function leaveMessage() {
+    if (!userData) {
+        alert('請先登入');
+        return;
+    }
+    
+    const msg = prompt('請輸入你想對店家說的話：');
+    if (!msg || msg.trim() === '') return;
+    
+    try {
+        const { error } = await mjClient.from('feedbacks').insert([{
+            sender_name: userData.displayName,
+            message: msg.trim()
+        }]);
+        
+        if (error) {
+            console.error('[MJ999] 留言異常:', error);
+            alert('留言失敗，請稍後再試。');
+        } else {
+            alert('✅ 留言已成功送出給店家！');
+        }
+    } catch (err) {
+        console.error('[MJ999] 網路錯誤:', err);
+        alert('網路連線異常，留言失敗。');
+    }
+}
 
 console.log('[MJ999] MJ999 智能配對系統腳本載入完成');
