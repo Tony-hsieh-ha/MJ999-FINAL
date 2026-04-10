@@ -103,7 +103,10 @@ async function loadRealTimeStats() {
             .order('created_at', { ascending: false });
         
         if (error) throw error;
-        gameStats.activeGames = data || [];
+
+        // 加入本地已取消牌局的過濾（避免 Supabase RLS 未設定導致舊資料復活）
+        const cancelledMatches = JSON.parse(localStorage.getItem('cancelledMatches') || '[]');
+        gameStats.activeGames = (data || []).filter(game => !cancelledMatches.includes(game.id));
         
         // 正常情況下使用 renderCards
         renderCards(gameStats.activeGames);
@@ -116,8 +119,6 @@ async function loadRealTimeStats() {
 function updateUI() {
     const availableTables = document.getElementById('available-tables');
     const waitingPlayers = document.getElementById('waiting-players');
-    const container = document.getElementById('room-cards');
-    const statusMsg = document.getElementById('room-status');
     
     if (availableTables) {
         availableTables.textContent = gameStats.totalTables - gameStats.activeGames.length;
@@ -126,33 +127,8 @@ function updateUI() {
         waitingPlayers.textContent = gameStats.activeGames.length;
     }
     
-    if (!container || !statusMsg) return;
-    
-    if (gameStats.activeGames.length === 0) {
-        container.style.display = 'none';
-        statusMsg.style.display = 'block';
-    } else {
-        container.style.display = 'grid';
-        statusMsg.style.display = 'none';
-        container.innerHTML = '';
-        gameStats.activeGames.forEach(game => {
-            const isMyGame = userData && game.creator_name === userData.displayName;
-            const card = document.createElement('div');
-            card.className = 'room-card';
-            card.setAttribute('data-game-id', game.id);
-            card.innerHTML = `
-                <div class="room-header">
-                    <h3>${game.creator_name}的局</h3>
-                    ${isMyGame ? '<span class="my-game-badge">我的牌局</span>' : ''}
-                </div>
-                <div class="room-info">底: ${game.score_type} | 時間: ${game.appointment_time}</div>
-                ${isMyGame 
-                    ? `<button class="cancel-btn" onclick="cancelMatch('${game.id}')">取消開局</button>`
-                    : `<button class="join-btn" onclick="quickJoinGame('${game.id}')">快速加入</button>`}
-            `;
-            container.appendChild(card);
-        });
-    }
+    // 呼叫獨立的 renderCards 函數來處理列表的顯示
+    renderCards(gameStats.activeGames);
 }
 
 // 刪除功能 - 手術級精確修復
@@ -186,6 +162,13 @@ async function cancelMatch(matchId) {
         // 執行成功後，手動更新本地數據
         gameStats.activeGames = gameStats.activeGames.filter(g => g.id !== matchId);
         
+        // 紀錄到 localStorage，避免即使後端因權限問題未真刪除，前台又把資料抓回來
+        let cancelledMatches = JSON.parse(localStorage.getItem('cancelledMatches') || '[]');
+        if (!cancelledMatches.includes(matchId)) {
+            cancelledMatches.push(matchId);
+            localStorage.setItem('cancelledMatches', JSON.stringify(cancelledMatches));
+        }
+        
         // 立即呼叫 renderCards 刷新畫面，不需要等待資料庫回傳
         renderCards(gameStats.activeGames);
         
@@ -218,19 +201,38 @@ function renderCards(games) {
         statusMsg.style.display = 'none';
         container.innerHTML = '';
         games.forEach(game => {
-            const isMyGame = userData && game.creator_name === userData.displayName;
+            // 解析出名字和頭像 (使用 ||| 分隔，具有向下相容性)
+            let creatorName = game.creator_name || '玩家';
+            let creatorAvatar = '';
+            
+            if (creatorName.includes('|||')) {
+                const parts = creatorName.split('|||');
+                creatorName = parts[0];
+                creatorAvatar = parts[1];
+            }
+
+            const isMyGame = userData && creatorName === userData.displayName;
             const card = document.createElement('div');
             card.className = 'room-card';
             card.setAttribute('data-game-id', game.id);
+            
+            // 處理頭像的 HTML (如果沒有 LINE 頭像，給個預設的圓圈)
+            const avatarHtml = creatorAvatar 
+                ? `<img src="${creatorAvatar}" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid #555;">` 
+                : `<div style="width: 36px; height: 36px; border-radius: 50%; background: #444; display: flex; align-items: center; justify-content: center; font-size: 16px; border: 2px solid #555; color: white;">👤</div>`;
+
             card.innerHTML = `
-                <div class="room-header">
-                    <h3>${game.creator_name}的局</h3>
+                <div class="room-header" style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        ${avatarHtml}
+                        <h3 style="margin: 0; font-size: 1.1em;">${creatorName}的局</h3>
+                    </div>
                     ${isMyGame ? '<span class="my-game-badge">我的牌局</span>' : ''}
                 </div>
-                <div class="room-info">底: ${game.score_type} | 時間: ${game.appointment_time}</div>
+                <div class="room-info" style="margin-top: 12px; font-size: 0.95em;">底: ${game.score_type} | 時間: ${game.appointment_time}</div>
                 ${isMyGame 
-                    ? `<button class="cancel-btn" onclick="cancelMatch('${game.id}')">取消開局</button>`
-                    : `<button class="join-btn" onclick="quickJoinGame('${game.id}')">快速加入</button>`}
+                    ? `<button class="cancel-btn" onclick="cancelMatch('${game.id}')" style="margin-top: 10px;">取消開局</button>`
+                    : `<button class="join-btn" onclick="quickJoinGame('${game.id}')" style="margin-top: 10px;">快速加入</button>`}
             `;
             container.appendChild(card);
         });
@@ -249,14 +251,14 @@ async function createNewGame() {
         const time = document.getElementById('game-time').value;
         
         console.log('[MJ999] 創建新局:', {
-            creator_name: userData.displayName,
+            creator_name: `${userData.displayName}|||${userData.pictureUrl || ''}`,
             score_type: stakes,
             appointment_time: time,
             status: 'waiting'
         });
         
         const { data, error } = await mjClient.from('matches').insert([{
-            creator_name: userData.displayName,
+            creator_name: `${userData.displayName}|||${userData.pictureUrl || ''}`,
             score_type: stakes,
             appointment_time: time,
             status: 'waiting'
@@ -290,8 +292,26 @@ async function quickJoinGame(gameId) {
         return;
     }
     
-    alert('正在加入遊戲...');
-    // TODO: 實際加入邏輯
+    if (!confirm('確定要加入這局嗎？')) return;
+    
+    try {
+        const { error } = await mjClient
+            .from('matches')
+            .update({ status: 'matched' })
+            .eq('id', gameId);
+            
+        if (error) {
+            console.error('[MJ999] 加入失敗:', error);
+            alert('加入失敗，請稍後再試');
+            return;
+        }
+        
+        alert('✅ 成功加入！');
+        loadRealTimeStats();
+    } catch (err) {
+        console.error('[MJ999] 網路錯誤:', err);
+        alert('網路錯誤，加入失敗');
+    }
 }
 
 // 時間選項 - 固定 24 小時靜態列表 (00:00~23:30)
