@@ -15,8 +15,8 @@ let gameStats = {
 };
 
 // Supabase 配置
-const SUPABASE_URL = 'https://fzthllltvxdxqtgjmazq.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_l4rasKEMGgqD7yeFtSbLlA_WmZrPxSA';
+const SUPABASE_URL = 'https://bujwbrsmhvqfinogaurp.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ1andicnNtaHZxZmlub2dhdXJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNTE1MTEsImV4cCI6MjA5MjgyNzUxMX0.1u5rpxMjrQ3WTN5BBJzqigNjHAI0FrI4N9VQ6xd4-zA';
 
 // 私有 Supabase 客戶端 - 避免與 window.supabase 衝突
 let mjClient = null;
