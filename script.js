@@ -18,6 +18,18 @@ let gameStats = {
 const SUPABASE_URL = 'https://bujwbrsmhvqfinogaurp.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ1andicnNtaHZxZmlub2dhdXJwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyNTE1MTEsImV4cCI6MjA5MjgyNzUxMX0.1u5rpxMjrQ3WTN5BBJzqigNjHAI0FrI4N9VQ6xd4-zA';
 
+// HTML 安全轉譯函數，防止 XSS 攻擊
+function escapeHTML(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+
 // 私有 Supabase 客戶端 - 避免與 window.supabase 衝突
 let mjClient = null;
 
@@ -113,6 +125,30 @@ async function initializeGameStats() {
     await loadRealTimeStats();
 }
 
+// 獲取並清理過期的 LocalStorage 取消紀錄 (保留 12 小時，避免資料無限增長)
+function getActiveCancelledMatches() {
+    let cancelled = {};
+    try {
+        // 向後相容：如果原本存在舊的 flat array 'cancelledMatches'，先清除它
+        if (localStorage.getItem('cancelledMatches')) {
+            localStorage.removeItem('cancelledMatches');
+        }
+        cancelled = JSON.parse(localStorage.getItem('cancelledMatchesObj') || '{}');
+    } catch (e) {
+        cancelled = {};
+    }
+    
+    const now = Date.now();
+    const active = {};
+    for (const [id, timestamp] of Object.entries(cancelled)) {
+        if (now - timestamp < 43200000) { // 12 小時
+            active[id] = timestamp;
+        }
+    }
+    localStorage.setItem('cancelledMatchesObj', JSON.stringify(active));
+    return Object.keys(active);
+}
+
 // 讀取資料 - 加入鎖定檢查
 async function loadRealTimeStats() {
     if (isDeleting) { console.log('[MJ999] 偵測到刪除進行中，跳過本次自動刷新'); return; }
@@ -123,10 +159,11 @@ async function loadRealTimeStats() {
     }
 
     try {
+        // [BUG FIX #1] 同時獲取 waiting 和 matched 狀態的牌局以精確計算桌數
         const { data, error } = await mjClient
             .from('matches')
             .select('*')
-            .eq('status', 'waiting')
+            .in('status', ['waiting', 'matched'])
             .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -135,8 +172,8 @@ async function loadRealTimeStats() {
         const banner = document.getElementById('db-offline-banner');
         if (banner) banner.remove();
 
-        // 加入本地已取消牌局的過濾（避免 Supabase RLS 未設定導致舊資料復活）
-        const cancelledMatches = JSON.parse(localStorage.getItem('cancelledMatches') || '[]');
+        // 獲取 12 小時內有效的本地取消牌局並過濾
+        const cancelledMatches = getActiveCancelledMatches();
         gameStats.activeGames = (data || []).filter(game => !cancelledMatches.includes(game.id));
 
         updateUI();
@@ -170,12 +207,14 @@ function updateUI() {
     const waitingPlayersEl = document.getElementById('waiting-players');
 
     if (availableTablesEl) {
-        // [BUG FIX #5] 防止顯示負數空桌
+        // [BUG FIX #5] 現場空桌 = 總桌數 - 所有活躍中(揪團中+配對成功)的牌局
         const available = Math.max(0, gameStats.totalTables - gameStats.activeGames.length);
         availableTablesEl.textContent = available;
     }
     if (waitingPlayersEl) {
-        waitingPlayersEl.textContent = gameStats.activeGames.length;
+        // 揪團中僅顯示 status === 'waiting' 的數量
+        const waitingCount = gameStats.activeGames.filter(g => g.status === 'waiting').length;
+        waitingPlayersEl.textContent = waitingCount;
     }
 
     renderCards(gameStats.activeGames);
@@ -200,61 +239,58 @@ async function cancelMatch(matchId) {
         isDeleting = true;
         console.log('[MJ999] 🗑️ 開始刪除牌局:', matchId);
 
-        const { error } = await mjClient
-            .from('matches')
-            .delete()
-            .match({ id: matchId });
+        const { error } = await mjClient.from('matches').delete().match({ id: matchId });
 
         if (error) {
-            console.error('[MJ999] 後台刪除失敗:', error);
             alert('刪除失敗，請重新整理');
             isDeleting = false;
             return;
         }
 
-        // 執行成功後，手動更新本地數據
         gameStats.activeGames = gameStats.activeGames.filter(g => g.id !== matchId);
-
-        // 紀錄到 localStorage，避免後端因權限問題未真刪除時前台把資料抓回來
-        let cancelledMatches = JSON.parse(localStorage.getItem('cancelledMatches') || '[]');
-        if (!cancelledMatches.includes(matchId)) {
-            cancelledMatches.push(matchId);
-            localStorage.setItem('cancelledMatches', JSON.stringify(cancelledMatches));
-        }
+        let cancelled = {};
+        try { cancelled = JSON.parse(localStorage.getItem('cancelledMatchesObj') || '{}'); } catch (e) {}
+        cancelled[matchId] = Date.now();
+        localStorage.setItem('cancelledMatchesObj', JSON.stringify(cancelled));
 
         renderCards(gameStats.activeGames);
         updateUI();
-
-        console.log('[MJ999] ✅ 刪除完成，畫面已更新');
         alert('✅ 已成功取消牌局');
-
     } catch (error) {
-        console.error('[MJ999] 刪除異常:', error);
         alert('刪除失敗，請重新整理');
         loadRealTimeStats();
     } finally {
-        // 5 秒內禁止任何自動刷新，防止被刪除的資料復活
         setTimeout(() => { isDeleting = false; }, 5000);
-        console.log('[MJ999] 🔓 5秒後解除刪除鎖定');
     }
 }
 
-// 獨立渲染函數 - 不依賴資料庫查詢
+// 獨立渲染函數
 function renderCards(games) {
     const container = document.getElementById('room-cards');
     const statusMsg = document.getElementById('room-status');
 
     if (!container || !statusMsg) return;
 
-    if (games.length === 0) {
+    const gamesToShow = games.filter(game => {
+        if (game.status === 'waiting') return true;
+        if (game.status === 'matched') {
+            let creatorName = game.creator_name || '';
+            if (creatorName.includes('|||')) creatorName = creatorName.split('|||')[0];
+            const creatorLineId = game.creator_line_id || null;
+            if (userLineId && creatorLineId) return userLineId === creatorLineId;
+            else if (userData) return creatorName === userData.displayName;
+        }
+        return false;
+    });
+
+    if (gamesToShow.length === 0) {
         container.style.display = 'none';
         statusMsg.style.display = 'block';
     } else {
         container.style.display = 'grid';
         statusMsg.style.display = 'none';
         container.innerHTML = '';
-        games.forEach(game => {
-            // 解析出名字和頭像 (使用 ||| 分隔，具有向下相容性)
+        gamesToShow.forEach(game => {
             let creatorName = game.creator_name || '玩家';
             let creatorAvatar = '';
             let creatorLineId = game.creator_line_id || null;
@@ -265,35 +301,42 @@ function renderCards(games) {
                 creatorAvatar = parts[1] || '';
             }
 
-            // [BUG FIX #4] 優先用 LINE userId 比對，若無則退回名字比對
             let isMyGame = false;
-            if (userLineId && creatorLineId) {
-                isMyGame = userLineId === creatorLineId;
-            } else if (userData) {
-                isMyGame = creatorName === userData.displayName;
-            }
+            if (userLineId && creatorLineId) isMyGame = userLineId === creatorLineId;
+            else if (userData) isMyGame = creatorName === userData.displayName;
 
             const card = document.createElement('div');
-            card.className = 'room-card';
+            card.className = 'room-card' + (game.status === 'matched' ? ' matched-card' : '');
             card.setAttribute('data-game-id', game.id);
 
-            // 處理頭像的 HTML
+            const safeAvatar = escapeHTML(creatorAvatar);
+            const safeName = escapeHTML(creatorName);
+            const safeStakes = escapeHTML(game.score_type);
+            const safeTime = escapeHTML(game.appointment_time === 'full' ? '滿開 (人滿即開)' : game.appointment_time);
+
             const avatarHtml = creatorAvatar
-                ? `<img src="${creatorAvatar}" onerror="this.outerHTML='<div style=\\'width:36px;height:36px;border-radius:50%;background:#444;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid #555;color:white;\\'>👤</div>'" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid #555;">`
+                ? `<img src="${safeAvatar}" onerror="this.outerHTML='<div style=\\'width:36px;height:36px;border-radius:50%;background:#444;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid #555;color:white;\\'>👤</div>'" style="width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid #555;">`
                 : `<div style="width: 36px; height: 36px; border-radius: 50%; background: #444; display: flex; align-items: center; justify-content: center; font-size: 16px; border: 2px solid #555; color: white;">👤</div>`;
+
+            let actionButtonHtml = '';
+            if (game.status === 'matched') {
+                actionButtonHtml = `<div class="matched-status-container" style="margin-top: 10px; padding: 8px; background: rgba(76, 175, 80, 0.15); border: 1px solid #4CAF50; border-radius: 6px; text-align: center; color: #4CAF50; font-weight: bold; font-size: 0.9em;">🎉 已配對成功！請洽櫃台入座</div>`;
+            } else if (isMyGame) {
+                actionButtonHtml = `<button class="cancel-btn" onclick="cancelMatch('${game.id}')" style="margin-top: 10px; width: 100%;">取消開局</button>`;
+            } else {
+                actionButtonHtml = `<button class="join-btn" onclick="quickJoinGame('${game.id}')" style="margin-top: 10px; width: 100%;">快速加入</button>`;
+            }
 
             card.innerHTML = `
                 <div class="room-header" style="display: flex; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 10px;">
                         ${avatarHtml}
-                        <h3 style="margin: 0; font-size: 1.1em;">${creatorName}的局</h3>
+                        <h3 style="margin: 0; font-size: 1.1em; color: #fff;">${safeName}的局</h3>
                     </div>
-                    ${isMyGame ? '<span class="my-game-badge">我的牌局</span>' : ''}
+                    ${isMyGame ? `<span class="my-game-badge" style="background: ${game.status === 'matched' ? '#4CAF50' : '#FFD700'}; color: #111; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold;">${game.status === 'matched' ? '已配對' : '我的牌局'}</span>` : ''}
                 </div>
-                <div class="room-info" style="margin-top: 12px; font-size: 0.95em;">底: ${game.score_type} | 時間: ${game.appointment_time}</div>
-                ${isMyGame
-                    ? `<button class="cancel-btn" onclick="cancelMatch('${game.id}')" style="margin-top: 10px;">取消開局</button>`
-                    : `<button class="join-btn" onclick="quickJoinGame('${game.id}')" style="margin-top: 10px;">快速加入</button>`}
+                <div class="room-info" style="margin-top: 12px; font-size: 0.95em; color: #ccc;">底: ${safeStakes} | 時間: ${safeTime}</div>
+                ${actionButtonHtml}
             `;
             container.appendChild(card);
         });
@@ -400,7 +443,7 @@ async function quickJoinGame(gameId) {
     }
 }
 
-// 時間選項 - 固定 24 小時靜態列表 (00:00~23:30)
+// 時間選項 - 依當前時間動態生成未來 12 小時內之半小時區間 (防止選擇過去時間)
 function initializeTimeOptions() {
     const select = document.getElementById('game-time');
     if (!select) return;
@@ -413,19 +456,36 @@ function initializeTimeOptions() {
     fullOption.textContent = '滿開 (人滿即開)';
     select.appendChild(fullOption);
 
-    // [BUG FIX #6] 移除每個時間選項的 console.log，只保留摘要 log
-    for (let hour = 0; hour < 24; hour++) {
-        for (let minute of [0, 30]) {
-            if (hour === 0 && minute === 0) continue;
-            const option = document.createElement('option');
-            const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-            option.value = timeStr;
-            option.textContent = timeStr;
-            select.appendChild(option);
-        }
+    const now = new Date();
+    // 捨入到下一個 30 分鐘
+    let current = new Date(now.getTime());
+    const minutes = current.getMinutes();
+    if (minutes > 0 && minutes <= 30) {
+        current.setMinutes(30, 0, 0);
+    } else {
+        current.setHours(current.getHours() + 1, 0, 0, 0);
     }
 
-    console.log(`[MJ999] ✅ 時間選項生成完成，共 ${select.options.length} 個選項`);
+    // 生成接下來 24 個半小時選項 (共 12 小時)
+    for (let i = 0; i < 24; i++) {
+        const optHour = current.getHours();
+        const optMin = current.getMinutes();
+        const timeStr = `${optHour.toString().padStart(2, '0')}:${optMin.toString().padStart(2, '0')}`;
+        
+        // 判斷是今天還是明天
+        const isTomorrow = current.getDate() !== now.getDate();
+        const prefix = isTomorrow ? '明天' : '今天';
+
+        const option = document.createElement('option');
+        option.value = timeStr;
+        option.textContent = `${prefix} ${timeStr}`;
+        select.appendChild(option);
+
+        // 增加 30 分鐘
+        current.setMinutes(current.getMinutes() + 30);
+    }
+
+    console.log(`[MJ999] ✅ 動態時間選項生成完成，共 ${select.options.length} 個選項`);
 }
 
 // 登入處理
@@ -439,8 +499,9 @@ function handleLogin() {
 
 // 登出處理
 function handleLogout() {
-    // [BUG FIX #3] 登出時清除 cancelledMatches，防止多帳號殘留問題
+    // 登出時清除本地所有取消快取，防止多帳號殘留問題
     localStorage.removeItem('cancelledMatches');
+    localStorage.removeItem('cancelledMatchesObj');
     console.log('[MJ999] 已清除本地快取，準備登出');
 
     if (liff.isLoggedIn()) {
